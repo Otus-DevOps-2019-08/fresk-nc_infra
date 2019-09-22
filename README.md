@@ -138,3 +138,157 @@ too many certificates already issued for: sslip.io: see https://letsencrypt.org/
 * https://man.openbsd.org/ssh
 * https://habr.com/ru/post/331348/
 * https://habr.com/ru/post/435546/
+
+## Homework 4. Практика управления ресурсами GCP через gcloud
+
+```
+testapp_IP = 35.241.146.103
+testapp_port = 9292
+```
+
+Установил gcloud. [Инструкция](https://cloud.google.com/sdk/docs/quickstart-macos).
+
+Создал инстанс для провеки:
+```
+gcloud compute instances create reddit-app \
+  --boot-disk-size=10GB \
+  --image-family ubuntu-1604-lts \
+  --image-project=ubuntu-os-cloud \
+  --machine-type=g1-small \
+  --tags puma-server \
+  --restart-on-failure
+  
+Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/zones/europe-west1-d/instances/reddit-app].
+NAME        ZONE            MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP     STATUS
+reddit-app  europe-west1-d  g1-small                   10.132.0.4   35.241.146.103  RUNNING
+```
+
+Подключился по ssh, установил Ruby и Bundler:
+```
+ssh appuser@35.241.146.103
+
+sudo apt update
+sudo apt install -y ruby-full ruby-bundler build-essential
+```
+
+Добавил ключи и репозиторий MongoDB:
+```
+sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv EA312927
+sudo bash -c 'echo "deb http://repo.mongodb.org/apt/ubuntu xenial/mongodb-org/3.2 multiverse" > /etc/apt/sources.list.d/mongodb-org-3.2.list'
+```
+
+Установил MongoDB:
+```
+sudo apt update
+sudo apt install -y mongodb-org
+```
+
+Во время установки получил ошибку:
+```
+W: GPG error: http://repo.mongodb.org/apt/ubuntu xenial/mongodb-org/3.2 Release: The following signatures couldn't be verified because the public key is not available: NO_PUBKEY D68FA50FEA312927
+E: The repository 'http://repo.mongodb.org/apt/ubuntu xenial/mongodb-org/3.2 Release' is not signed.
+N: Updating from such a repository can't be done securely, and is therefore disabled by default.
+N: See apt-secure(8) manpage for repository creation and user configuration details.
+```
+
+Скачал ключи как описано в [официальной документации](https://docs.mongodb.com/v3.2/tutorial/install-mongodb-on-ubuntu/):
+```
+wget -qO - https://www.mongodb.org/static/pgp/server-3.2.asc | sudo apt-key add -
+```
+Еще раз попробовал установить - ОК.
+
+Запустил MongoDB:
+```
+sudo systemctl start mongod
+```
+
+Добавил в автозапуск:
+```
+sudo systemctl enable mongod
+```
+
+Проверил работу MongoDB:
+```
+sudo systemctl status mongod
+
+mongod.service - High-performance, schema-free document-oriented database
+   Loaded: loaded (/lib/systemd/system/mongod.service; enabled; vendor preset: enabled)
+   Active: active (running) since Sat 2019-09-21 15:56:18 UTC; 3min 6s ago
+     Docs: https://docs.mongodb.org/manual
+ Main PID: 10058 (mongod)
+    Tasks: 19
+   Memory: 30.0M
+      CPU: 956ms
+   CGroup: /system.slice/mongod.service
+           └─10058 /usr/bin/mongod --quiet --config /etc/mongod.conf
+```
+
+Склонировал репозиторий с приложением:
+```
+cd /home/appuser
+git clone -b monolith https://github.com/express42/reddit.git
+```
+
+Установил зависимости приложения:
+```
+cd reddit && bundle install
+```
+
+Запустил сервер:
+```
+puma -d
+```
+
+Проверил, что сервер запустился и нашел порт:
+```
+ps aux | grep puma
+
+appuser  10841  1.0  1.5 515356 26724 ?        Sl   16:03   0:00 puma 3.10.0 (tcp://0.0.0.0:9292) [reddit]
+appuser  10855  0.0  0.0  12916  1016 pts/0    S+   16:03   0:00 grep --color=auto puma
+```
+
+Открыл порт в firewall:
+VPC Network -> Firewall rules -> Create firewall rule
+```
+name: default-puma-server
+targets: puma-server
+IP ranges: 0.0.0.0/0
+protocols/ports: tcp:9292
+```
+
+Открыл интерфейс по адресу http://35.241.146.103:9292
+
+### Дополнительное задание
+
+Создание VM с указанием startup-script:
+```
+gcloud compute instances create reddit-app \
+  --boot-disk-size=10GB \
+  --image-family ubuntu-1604-lts \
+  --image-project=ubuntu-os-cloud \
+  --machine-type=g1-small \
+  --tags puma-server \
+  --restart-on-failure \
+  --metadata-from-file startup-script=startup_script.sh
+  
+Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/zones/europe-west1-d/instances/reddit-app].
+NAME        ZONE            MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP     STATUS
+reddit-app  europe-west1-d  g1-small                   10.132.0.5   35.241.146.103  RUNNING
+```
+
+Создание firewall rule с помощью gcloud:
+```
+gcloud compute firewall-rules create default-puma-server \
+  --action allow \
+  --target-tags puma-server \
+  --rules tcp:9292
+
+Creating firewall...⠏Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/global/firewalls/default-puma-server].
+Creating firewall...done.
+NAME                 NETWORK  DIRECTION  PRIORITY  ALLOW     DENY  DISABLED
+default-puma-server  default  INGRESS    1000      tcp:9292        False
+```
+
+### Список полезных источников
+* https://cloud.google.com/vpc/docs/using-firewalls
+* https://cloud.google.com/compute/docs/startupscript

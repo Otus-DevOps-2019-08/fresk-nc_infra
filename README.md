@@ -158,7 +158,7 @@ gcloud compute instances create reddit-app \
   --tags puma-server \
   --restart-on-failure
   
-Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/zones/europe-west1-d/instances/reddit-app].
+Created [https://www.googleapis.com/compute/v1/projects/formal-office-*****/zones/europe-west1-d/instances/reddit-app].
 NAME        ZONE            MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP     STATUS
 reddit-app  europe-west1-d  g1-small                   10.132.0.4   35.241.146.103  RUNNING
 ```
@@ -271,7 +271,7 @@ gcloud compute instances create reddit-app \
   --restart-on-failure \
   --metadata-from-file startup-script=startup_script.sh
   
-Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/zones/europe-west1-d/instances/reddit-app].
+Created [https://www.googleapis.com/compute/v1/projects/formal-office-*****/zones/europe-west1-d/instances/reddit-app].
 NAME        ZONE            MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP     STATUS
 reddit-app  europe-west1-d  g1-small                   10.132.0.5   35.241.146.103  RUNNING
 ```
@@ -283,7 +283,7 @@ gcloud compute firewall-rules create default-puma-server \
   --target-tags puma-server \
   --rules tcp:9292
 
-Creating firewall...⠏Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/global/firewalls/default-puma-server].
+Creating firewall...⠏Created [https://www.googleapis.com/compute/v1/projects/formal-office-*****/global/firewalls/default-puma-server].
 Creating firewall...done.
 NAME                 NETWORK  DIRECTION  PRIORITY  ALLOW     DENY  DISABLED
 default-puma-server  default  INGRESS    1000      tcp:9292        False
@@ -314,7 +314,7 @@ gcloud auth application-default login
   "builders": [
     {
       "type": "googlecompute",
-      "project_id": "formal-office-253321",
+      "project_id": "formal-office-*****",
       "image_name": "reddit-base-{{timestamp}}",
       "image_family": "reddit-base",
       "source_image_family": "ubuntu-1604-lts",
@@ -365,7 +365,7 @@ gcloud compute instances create reddit-app \
   --zone=europe-west1-b \
   --restart-on-failure
   
-Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/zones/europe-west1-b/instances/reddit-app].
+Created [https://www.googleapis.com/compute/v1/projects/formal-office-*****/zones/europe-west1-b/instances/reddit-app].
 NAME        ZONE            MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP    STATUS
 reddit-app  europe-west1-b  g1-small                   10.132.0.7   34.77.191.194  RUNNING
 ```
@@ -392,8 +392,61 @@ gcloud compute firewall-rules create default-puma-server \
   --target-tags puma-server \
   --rules tcp:9292
   
-Creating firewall...⠏Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/global/firewalls/default-puma-server].
+Creating firewall...⠏Created [https://www.googleapis.com/compute/v1/projects/formal-office-*****/global/firewalls/default-puma-server].
 Creating firewall...done.
 NAME                 NETWORK  DIRECTION  PRIORITY  ALLOW     DENY  DISABLED
 default-puma-server  default  INGRESS    1000      tcp:9292        False  
 ```
+
+### Самостоятельное задание
+
+Объявил переменные в ubuntu16.json
+```
+{
+  "variables": {
+    "project_id": null,
+    "source_image_family": null,
+    "machine_type": "f1-micro"
+  },
+  "builders": [
+    {
+      "type": "googlecompute",
+      "project_id": "{{user `project_id`}}",
+      "image_name": "reddit-base-{{timestamp}}",
+      "image_family": "reddit-base",
+      "source_image_family": "{{user `source_image_family`}}",
+      "zone": "europe-west1-b",
+      "ssh_username": "appuser",
+      "machine_type": "f1-micro"
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "script": "scripts/install_ruby.sh",
+      "execute_command": "sudo {{.Path}}"
+    },
+    {
+      "type": "shell",
+      "script": "scripts/install_mongodb.sh",
+      "execute_command": "sudo {{.Path}}"
+    }
+  ]
+}
+```
+
+Запустил валидацию:
+```
+packer validate ./ubuntu16.json
+
+Error initializing core: 2 errors occurred:
+	* required variable not set: project_id
+	* required variable not set: source_image_family
+```
+
+Добавил файл с переменными и запустил валидацию:
+```
+packer validate --var-file=variables.json ./ubuntu16.json
+
+Template validated successfully.
+```	

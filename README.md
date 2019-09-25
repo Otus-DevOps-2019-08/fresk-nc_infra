@@ -292,3 +292,108 @@ default-puma-server  default  INGRESS    1000      tcp:9292        False
 ### Список полезных источников
 * https://cloud.google.com/vpc/docs/using-firewalls
 * https://cloud.google.com/compute/docs/startupscript
+
+## Homework 5. Сборка образов VM при помощи Packer
+
+Установил Packer - https://www.packer.io/downloads.html
+
+```
+packer -v
+
+1.4.3
+```
+
+Создал ADC(Application Default Credentials) для работы с GCP:
+```
+gcloud auth application-default login
+```
+
+Создал конфиг packer/ubuntu16.json:
+```
+{
+  "builders": [
+    {
+      "type": "googlecompute",
+      "project_id": "formal-office-253321",
+      "image_name": "reddit-base-{{timestamp}}",
+      "image_family": "reddit-base",
+      "source_image_family": "ubuntu-1604-lts",
+      "zone": "europe-west1-b",
+      "ssh_username": "appuser",
+      "machine_type": "f1-micro"
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "script": "scripts/install_ruby.sh",
+      "execute_command": "sudo {{.Path}}"
+    },
+    {
+      "type": "shell",
+      "script": "scripts/install_mongodb.sh",
+      "execute_command": "sudo {{.Path}}"
+    }
+  ]
+}
+```
+
+Скопировал скрипты с прошлого ДЗ install_ruby.sh и install_mongodb.sh в папку packer/scripts
+
+Запустил проверку шаблона:
+```
+cd packer
+packer validate ./ubuntu16.json
+
+Template validated successfully.
+```
+
+Запустил билд образа:
+```
+packer build ubuntu16.json
+
+--> googlecompute: A disk image was created: reddit-base-1569440112
+```
+
+Создал новый инстанс:
+```
+gcloud compute instances create reddit-app \
+  --boot-disk-size=10GB \
+  --image=reddit-base-1569440112 \
+  --machine-type=g1-small \
+  --tags=puma-server \
+  --zone=europe-west1-b \
+  --restart-on-failure
+  
+Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/zones/europe-west1-b/instances/reddit-app].
+NAME        ZONE            MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP    STATUS
+reddit-app  europe-west1-b  g1-small                   10.132.0.7   34.77.191.194  RUNNING
+```
+
+Подключился по ssh:
+```
+ssh appuser@34.77.191.194
+```
+
+Установил и запустил приложение
+```
+git clone -b monolith https://github.com/express42/reddit.git
+cd reddit && bundle install
+puma -d
+ps aux | grep puma
+
+appuser   2637  3.5  1.5 515368 26668 ?        Sl   19:56   0:00 puma 3.10.0 (tcp://0.0.0.0:9292) [reddit]
+```
+
+Создал firewall правило:
+```
+gcloud compute firewall-rules create default-puma-server \
+  --action allow \
+  --target-tags puma-server \
+  --rules tcp:9292
+  
+Creating firewall...⠏Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/global/firewalls/default-puma-server].
+Creating firewall...done.
+NAME                 NETWORK  DIRECTION  PRIORITY  ALLOW     DENY  DISABLED
+default-puma-server  default  INGRESS    1000      tcp:9292        False  
+```

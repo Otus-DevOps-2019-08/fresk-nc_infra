@@ -449,4 +449,14 @@ Error initializing core: 2 errors occurred:
 packer validate --var-file=variables.json ./ubuntu16.json
 
 Template validated successfully.
-```	
+```
+
+Добавил дополнительные параметры:
+```
+...
+"image_description": "Some image for homework 5",
+"disk_type": "pd-ssd",
+"disk_size": 15,
+"tags": [ "puma-server" ],
+...
+```

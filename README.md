@@ -460,3 +460,32 @@ Template validated successfully.
 "tags": [ "puma-server" ],
 ...
 ```
+
+### Задание со *
+
+Создал образ reddit-full:
+```
+packer build --var-file=variables.json immutable.json
+```
+
+Создал инстанс на основе образа reddit-full:
+```
+gcloud compute instances create reddit-app \
+  --boot-disk-size=15GB \
+  --image=reddit-full-1569449699 \
+  --machine-type=g1-small \
+  --tags=puma-server \
+  --zone=europe-west1-b \
+  --restart-on-failure
+```
+
+Добавил скрипт config-scripts/create-reddit-vm.sh для создания 
+инстанса на основе образа reddit-full.
+
+### Список полезных источников
+* https://www.packer.io/docs/builders/googlecompute.html
+* https://www.packer.io/docs/templates/user-variables.html
+* https://www.packer.io/docs/provisioners/file.html
+* http://cloudurable.com/blog/aws-ansible-packer-ssh-for-devops/index.html
+* https://github.com/puma/puma/blob/master/docs/systemd.md
+* https://habr.com/ru/company/southbridge/blog/255845/

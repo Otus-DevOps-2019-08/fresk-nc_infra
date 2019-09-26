@@ -1,0 +1,39 @@
+{
+  "variables": {
+    "project_id": null,
+    "source_image": "reddit-base-1569443825"
+  },
+  "builders": [
+    {
+      "type": "googlecompute",
+      "project_id": "{{user `project_id`}}",
+      "image_name": "reddit-full-{{timestamp}}",
+      "image_description": "Some image for extra homework 5",
+      "image_family": "reddit-full",
+      "tags": [ "puma-server" ],
+      "source_image": "{{user `source_image`}}",
+      "machine_type": "g1-small",
+      "disk_type": "pd-ssd",
+      "disk_size": 15,
+      "ssh_username": "appuser",
+      "zone": "europe-west1-b"
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "script": "scripts/install_reddit.sh",
+      "execute_command": "{{.Path}}"
+    },
+    {
+      "type": "file",
+      "source": "files/puma.service",
+      "destination": "/tmp/puma.service"
+    },
+    {
+      "type": "shell",
+      "script": "scripts/startup.sh",
+      "execute_command": "sudo {{.Path}}"
+    }
+  ]
+}

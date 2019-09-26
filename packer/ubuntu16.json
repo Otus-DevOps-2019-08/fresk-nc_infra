@@ -13,7 +13,6 @@
       "image_family": "reddit-base",
       "disk_type": "pd-ssd",
       "disk_size": 15,
-      "tags": [ "puma-server" ],
       "source_image_family": "{{user `source_image_family`}}",
       "zone": "europe-west1-b",
       "ssh_username": "appuser",

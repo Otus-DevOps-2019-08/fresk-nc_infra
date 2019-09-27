@@ -158,7 +158,7 @@ gcloud compute instances create reddit-app \
   --tags puma-server \
   --restart-on-failure
   
-Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/zones/europe-west1-d/instances/reddit-app].
+Created [https://www.googleapis.com/compute/v1/projects/formal-office-*****/zones/europe-west1-d/instances/reddit-app].
 NAME        ZONE            MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP     STATUS
 reddit-app  europe-west1-d  g1-small                   10.132.0.4   35.241.146.103  RUNNING
 ```
@@ -271,7 +271,7 @@ gcloud compute instances create reddit-app \
   --restart-on-failure \
   --metadata-from-file startup-script=startup_script.sh
   
-Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/zones/europe-west1-d/instances/reddit-app].
+Created [https://www.googleapis.com/compute/v1/projects/formal-office-*****/zones/europe-west1-d/instances/reddit-app].
 NAME        ZONE            MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP     STATUS
 reddit-app  europe-west1-d  g1-small                   10.132.0.5   35.241.146.103  RUNNING
 ```
@@ -283,7 +283,7 @@ gcloud compute firewall-rules create default-puma-server \
   --target-tags puma-server \
   --rules tcp:9292
 
-Creating firewall...⠏Created [https://www.googleapis.com/compute/v1/projects/formal-office-253321/global/firewalls/default-puma-server].
+Creating firewall...⠏Created [https://www.googleapis.com/compute/v1/projects/formal-office-*****/global/firewalls/default-puma-server].
 Creating firewall...done.
 NAME                 NETWORK  DIRECTION  PRIORITY  ALLOW     DENY  DISABLED
 default-puma-server  default  INGRESS    1000      tcp:9292        False
@@ -292,3 +292,200 @@ default-puma-server  default  INGRESS    1000      tcp:9292        False
 ### Список полезных источников
 * https://cloud.google.com/vpc/docs/using-firewalls
 * https://cloud.google.com/compute/docs/startupscript
+
+## Homework 5. Сборка образов VM при помощи Packer
+
+Установил Packer - https://www.packer.io/downloads.html
+
+```
+packer -v
+
+1.4.3
+```
+
+Создал ADC(Application Default Credentials) для работы с GCP:
+```
+gcloud auth application-default login
+```
+
+Создал конфиг packer/ubuntu16.json:
+```
+{
+  "builders": [
+    {
+      "type": "googlecompute",
+      "project_id": "formal-office-*****",
+      "image_name": "reddit-base-{{timestamp}}",
+      "image_family": "reddit-base",
+      "source_image_family": "ubuntu-1604-lts",
+      "zone": "europe-west1-b",
+      "ssh_username": "appuser",
+      "machine_type": "f1-micro"
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "script": "scripts/install_ruby.sh",
+      "execute_command": "sudo {{.Path}}"
+    },
+    {
+      "type": "shell",
+      "script": "scripts/install_mongodb.sh",
+      "execute_command": "sudo {{.Path}}"
+    }
+  ]
+}
+```
+
+Скопировал скрипты с прошлого ДЗ install_ruby.sh и install_mongodb.sh в папку packer/scripts
+
+Запустил проверку шаблона:
+```
+cd packer
+packer validate ./ubuntu16.json
+
+Template validated successfully.
+```
+
+Запустил билд образа:
+```
+packer build ubuntu16.json
+
+--> googlecompute: A disk image was created: reddit-base-1569440112
+```
+
+Создал новый инстанс:
+```
+gcloud compute instances create reddit-app \
+  --boot-disk-size=10GB \
+  --image=reddit-base-1569440112 \
+  --machine-type=g1-small \
+  --tags=puma-server \
+  --zone=europe-west1-b \
+  --restart-on-failure
+  
+Created [https://www.googleapis.com/compute/v1/projects/formal-office-*****/zones/europe-west1-b/instances/reddit-app].
+NAME        ZONE            MACHINE_TYPE  PREEMPTIBLE  INTERNAL_IP  EXTERNAL_IP    STATUS
+reddit-app  europe-west1-b  g1-small                   10.132.0.7   34.77.191.194  RUNNING
+```
+
+Подключился по ssh:
+```
+ssh appuser@34.77.191.194
+```
+
+Установил и запустил приложение
+```
+git clone -b monolith https://github.com/express42/reddit.git
+cd reddit && bundle install
+puma -d
+ps aux | grep puma
+
+appuser   2637  3.5  1.5 515368 26668 ?        Sl   19:56   0:00 puma 3.10.0 (tcp://0.0.0.0:9292) [reddit]
+```
+
+Создал firewall правило:
+```
+gcloud compute firewall-rules create default-puma-server \
+  --action allow \
+  --target-tags puma-server \
+  --rules tcp:9292
+  
+Creating firewall...⠏Created [https://www.googleapis.com/compute/v1/projects/formal-office-*****/global/firewalls/default-puma-server].
+Creating firewall...done.
+NAME                 NETWORK  DIRECTION  PRIORITY  ALLOW     DENY  DISABLED
+default-puma-server  default  INGRESS    1000      tcp:9292        False  
+```
+
+### Самостоятельное задание
+
+Объявил переменные в ubuntu16.json
+```
+{
+  "variables": {
+    "project_id": null,
+    "source_image_family": null,
+    "machine_type": "f1-micro"
+  },
+  "builders": [
+    {
+      "type": "googlecompute",
+      "project_id": "{{user `project_id`}}",
+      "image_name": "reddit-base-{{timestamp}}",
+      "image_family": "reddit-base",
+      "source_image_family": "{{user `source_image_family`}}",
+      "zone": "europe-west1-b",
+      "ssh_username": "appuser",
+      "machine_type": "f1-micro"
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "script": "scripts/install_ruby.sh",
+      "execute_command": "sudo {{.Path}}"
+    },
+    {
+      "type": "shell",
+      "script": "scripts/install_mongodb.sh",
+      "execute_command": "sudo {{.Path}}"
+    }
+  ]
+}
+```
+
+Запустил валидацию:
+```
+packer validate ./ubuntu16.json
+
+Error initializing core: 2 errors occurred:
+	* required variable not set: project_id
+	* required variable not set: source_image_family
+```
+
+Добавил файл с переменными и запустил валидацию:
+```
+packer validate --var-file=variables.json ./ubuntu16.json
+
+Template validated successfully.
+```
+
+Добавил дополнительные параметры:
+```
+...
+"image_description": "Some image for homework 5",
+"disk_type": "pd-ssd",
+"disk_size": 15,
+"tags": [ "puma-server" ],
+...
+```
+
+### Задание со *
+
+Создал образ reddit-full:
+```
+packer build --var-file=variables.json immutable.json
+```
+
+Создал инстанс на основе образа reddit-full:
+```
+gcloud compute instances create reddit-app \
+  --boot-disk-size=15GB \
+  --image=reddit-full-1569449699 \
+  --machine-type=g1-small \
+  --tags=puma-server \
+  --zone=europe-west1-b \
+  --restart-on-failure
+```
+
+Добавил скрипт config-scripts/create-reddit-vm.sh для создания 
+инстанса на основе образа reddit-full.
+
+### Список полезных источников
+* https://www.packer.io/docs/builders/googlecompute.html
+* https://www.packer.io/docs/templates/user-variables.html
+* https://www.packer.io/docs/provisioners/file.html
+* http://cloudurable.com/blog/aws-ansible-packer-ssh-for-devops/index.html
+* https://github.com/puma/puma/blob/master/docs/systemd.md
+* https://habr.com/ru/company/southbridge/blog/255845/

@@ -489,3 +489,245 @@ gcloud compute instances create reddit-app \
 * http://cloudurable.com/blog/aws-ansible-packer-ssh-for-devops/index.html
 * https://github.com/puma/puma/blob/master/docs/systemd.md
 * https://habr.com/ru/company/southbridge/blog/255845/
+
+## Homework 6. Практика IaC с использованием Terraform
+
+Скачал Terraform https://www.terraform.io/downloads.html
+
+```
+terraform -v
+
+Terraform v0.12.9
+```
+
+### Провайдеры
+
+Добавил провайдера для терраформа:
+```
+terraform/main.tf
+
+terraform {
+  # Версия terraform
+  required_version = "0.12.9"
+}
+
+provider "google" {
+  # Версия провайдера
+  version = "2.15"
+
+  # ID проекта
+  project = "formal-office-****"
+
+  region = "europe-west-1"
+}
+```
+
+Загрузил провайдер:
+```
+terraform init
+
+Initializing the backend...
+
+Initializing provider plugins...
+- Checking for available provider plugins...
+- Downloading plugin for provider "google" (hashicorp/google) 2.15.0...
+
+Terraform has been successfully initialized!
+
+You may now begin working with Terraform. Try running "terraform plan" to see
+any changes that are required for your infrastructure. All Terraform commands
+should now work.
+
+If you ever set or change modules or backend configuration for Terraform,
+rerun this command to reinitialize your working directory. If you forget, other
+commands will detect it and remind you to do so if necessary.
+```
+
+### Ресурсы
+
+Добавил ресурс:
+```
+resource "google_compute_instance" "app" {
+  name = "reddit-app"
+  machine_type = "g1-small"
+  zone = "europe-west1-b"
+
+  metadata = {
+    # путь до публичного ключа
+    ssh-keys = "appuser:${file("~/.ssh/appuser.pub")}"
+  }
+
+  boot_disk {
+    initialize_params {
+      image = "reddit-base"
+    }
+  }
+
+  network_interface {
+    network = "default"
+    access_config {}
+  }
+}
+```
+
+Проверил и применил изменения:
+```
+terraform plan
+
+terraform apply --auto-approve
+```
+
+Получил IP инстанса и подключился по ssh:
+```
+terraform show | grep nat_ip
+
+ssh appuser@34.77.248.5
+```
+
+### Output vars
+
+Создал файл c output переменными - outputs.tf
+Записал туда IP инстанса:
+```
+output "app_external_ip" {
+  value = google_compute_instance.app.network_interface[0].access_config[0].nat_ip
+}
+```
+
+Выполнил `terraform refresh` чтобы переменная приняла значение.
+
+Вывел переменную:
+```
+terraform output
+
+app_external_ip = 34.77.248.5
+```
+
+### Добавление правила firewall
+
+Добавил firewall правило:
+```
+resource "google_compute_firewall" "firewall_puma" {
+  name = "allow-puma-default"
+
+  # Название сети, в которой действует правило
+  network = "default"
+
+  # Какой доступ разрешить
+  allow {
+    protocol = "tcp"
+    ports = ["9292"]
+  }
+
+  # Каким адресам разрешаем доступ
+  source_ranges = ["0.0.0.0/0"]
+
+  # Правило применимо для инстансов с перечисленными тэгами
+  target_tags = ["reddit-app"]
+}
+```
+
+Добавил тег внутрь ресурса app:
+```
+tags = ["reddit-app"]
+```
+
+Проверил и применил изменения
+```
+terraform plan
+terraform apply --auto-approve
+```
+
+### Провижины
+
+https://www.terraform.io/docs/provisioners/index.html
+
+Добавил провижин внутрь ресурса app, который копирует файл puma.service:
+```
+provisioner "file" {
+  source = "files/puma.service"
+  destination = "/tmp/puma.service"
+}
+```
+
+Добавил провижин внутрь ресурса app, который запускает приложение:
+```
+provisioner "remote-exec" {
+  script = "files/deploy.sh"
+}
+```
+
+Добавил параметры подключения для провижинов внутрь ресурса app:
+```
+connection {
+  type = "ssh"
+  host = self.network_interface[0].access_config[0].nat_ip
+  user = "appuser"
+  agent = false
+  # путь до приватного ключа
+  private_key = file("~/.ssh/appuser")
+}
+```
+
+Так как провижинеры по умолчанию запускаются сразу после
+создания ресурса (могут еще запускаться после его удаления),
+чтобы проверить их работу, нужно удалить ресурс VM и создать
+его снова.
+Terraform предлагает команду taint, которая позволяет пометить
+ресурс, который terraform должен пересоздать, при следующем
+запуске terraform apply.
+
+Говорим terraform'y пересоздать ресурс VM при следующем
+применении изменений:
+
+```
+terraform taint google_compute_instance.app
+
+The resource google_compute_instance.app in the module root
+has been marked as tainted!
+```
+
+Применил изменения:
+```
+terraform plan
+terraform apply --auto-approve
+```
+
+### Input vars
+
+Входные переменные позволяют параметризировать
+конфигурационные файлы. Для того чтобы использовать входную переменную ее нужно 
+сначала определить в одном из конфигурационных файлов.
+
+Создал файл variables.tf:
+```
+variable project {
+  description = "Project ID"
+}
+variable region {
+  description = "Region"
+  # Значение по умолчанию
+  default = "europe-west1"
+}
+variable public_key_path {
+  # Описание переменной
+  description = "Path to the public key used for ssh access"
+}
+variable disk_image {
+  description = "Disk image"
+}
+
+```
+Чтобы получить значение пользовательской
+переменной внутри ресурса используется синтаксис `var.var_name`.
+
+Заменил в main.tf захардкоженные значения на переменные.
+
+Определил переменные используя специальный файл
+terraform.tfvars, из которого тераформ загружает значения
+автоматически при каждом запуске:
+```
+project = "formal-office-*****"
+public_key_path = "~/.ssh/appuser.pub"
+disk_image = "reddit-base"
+```

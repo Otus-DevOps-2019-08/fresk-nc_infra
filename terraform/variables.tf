@@ -20,3 +20,7 @@ variable private_key_path {
 variable disk_image {
   description = "Disk image"
 }
+variable instances_count {
+  description = "count of instances"
+  default     = 1
+}

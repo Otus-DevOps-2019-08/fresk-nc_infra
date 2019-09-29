@@ -731,3 +731,84 @@ project = "formal-office-*****"
 public_key_path = "~/.ssh/appuser.pub"
 disk_image = "reddit-base"
 ```
+
+### Задание со *
+
+Добавил в метаданные проекта два ssh ключа:
+```
+resource "google_compute_project_metadata" "default" {
+  metadata = {
+    ssh-keys = "appuser1:${file(var.public_key_path)}appuser2:${file(var.public_key_path)}"
+  }
+}
+```
+
+Если в интерфейсе добавить третий ключ, а потом выполнить `terraform apply`,
+то добавленный ключ удалится.
+
+### Задание с **
+
+Создал google_compute_forwarding_rule
+```
+resource "google_compute_forwarding_rule" "app-forwarding-rule" {
+  name       = "app-forwarding-rule"
+  target     = "${google_compute_target_pool.app-target-pool.self_link}"
+  port_range = "9292"
+}
+```
+
+Создал google_compute_target_pool
+```
+resource "google_compute_target_pool" "app-target-pool" {
+  name = "app-target-pool"
+
+  instances = [
+    "${google_compute_instance.app.self_link}",
+    "${google_compute_instance.app2.self_link}",
+  ]  
+
+  health_checks = [
+    "${google_compute_http_health_check.app-healthcheck.name}",
+  ]
+}
+```
+
+Создал google_compute_http_health_check
+```
+resource "google_compute_http_health_check" "app-healthcheck" {
+  name = "app-healthcheck"
+  port = "9292"
+}
+```
+
+Скопировал конфиг инстанса app, назвал app2
+
+Проверил и применил конфиг
+```
+terraform plan
+terraform apply --auto-approve
+```
+
+Зашел по адресу балансера, убедился, что открывается приложение.
+Зашел по ssh на один из инстансов и отключил puma, убедился, что
+приложение по прежнему открывается.
+
+Избавился от app2, так как такой подход мешает масштабированию.
+В app добавил параметр `count = var.instances_count`, который равен 2.
+В google_compute_target_pool заменил параметр `instances`:
+```
+instances = "${google_compute_instance.app[*].self_link}"
+```
+
+Добавил output переменную
+```
+output "lb_external_ip" {
+  value = google_compute_forwarding_rule.app-forwarding-rule.ip_address
+}
+```
+
+### Список полезных источников
+* https://cloud.google.com/load-balancing/docs/https/
+* https://www.terraform.io/docs/providers/google/r/compute_forwarding_rule.html
+* https://www.terraform.io/docs/providers/google/r/compute_target_pool.html
+* https://www.terraform.io/docs/providers/google/r/compute_http_health_check.html

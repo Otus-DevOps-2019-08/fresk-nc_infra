@@ -981,3 +981,26 @@ output storage-bucket_url {
   value = module.storage-bucket.url
 }
 ```
+
+### Задание со *
+
+Добавил gcs бекенд, для хранения стейта в сторадже:
+```
+terraform {
+  backend "gcs" {
+    bucket  = "fresk-storage-bucket"
+    prefix  = "terraform/prod/state"
+  }
+}
+```
+
+### Задание с **
+
+Добавил провижины для modules/app, чтобы скачать и запустить приложение.
+Добавил конфиг для mongodb, где поменял `bindIp: 127.0.0.1` на `bindIp: 0.0.0.0`,
+и соотвественно провижины для modules/db для загрузки этого конфига.
+
+### Список полезных источников
+* https://www.terraform.io/docs/backends/types/gcs.html
+* https://github.com/coreos/docs/blob/master/os/using-environment-variables-in-systemd-units.md
+* https://docs.mongodb.com/manual/reference/configuration-options/

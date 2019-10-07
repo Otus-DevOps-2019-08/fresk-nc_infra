@@ -1,0 +1,29 @@
+{
+  "variables": {
+    "project_id": null,
+    "source_image_family": null,
+    "machine_type": "f1-micro"
+  },
+  "builders": [
+    {
+      "type": "googlecompute",
+      "project_id": "{{user `project_id`}}",
+      "image_name": "reddit-app-{{timestamp}}",
+      "image_description": "Image with ruby for homework 7",
+      "image_family": "reddit-app",
+      "disk_type": "pd-ssd",
+      "disk_size": 15,
+      "source_image_family": "ubuntu-1604-lts",
+      "zone": "europe-west1-b",
+      "ssh_username": "appuser",
+      "machine_type": "f1-micro"
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "shell",
+      "script": "scripts/install_ruby.sh",
+      "execute_command": "sudo {{.Path}}"
+    }
+  ]
+}

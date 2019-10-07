@@ -812,3 +812,195 @@ output "lb_external_ip" {
 * https://www.terraform.io/docs/providers/google/r/compute_forwarding_rule.html
 * https://www.terraform.io/docs/providers/google/r/compute_target_pool.html
 * https://www.terraform.io/docs/providers/google/r/compute_http_health_check.html
+
+## Homework 7. Принципы организации инфраструктурного кода и работа над инфраструктурой в команде на примере Terraform.
+
+Добавил ресурс - правило firewall для 22 порта
+```
+resource "google_compute_firewall" "firewall_ssh" {
+  name = "default-allow-ssh"
+  network = "default"
+
+  allow {
+    protocol = "tcp"
+    ports = ["22"]
+  }
+
+  source_ranges = ["0.0.0.0/0"]
+}
+```
+
+`terraform apply` вызвал ошибку
+```
+* google_compute_firewall.firewall_ssh: 1 error(s) occurred:
+* google_compute_firewall.firewall_ssh: Error creating firewall: googleapi: Error 409:
+The resource 'projects/infra-/global/firewalls/default-allow-ssh' already exists,
+alreadyExists
+```
+
+Возникает т.к. terraform ничего не знает о существующем правиле
+файервола (а всю информацию, об известных ему ресурсах, он
+хранит в state файле), то при выполнении команды apply
+terraform пытается создать новое правило файервола. Для того
+чтобы сказать terraform-у не создавать новое правило, а управлять
+уже имеющимся, в его "записную книжку" (state файл) о всех
+ресурсах, которыми он управляет, нужно занести информацию о
+существующем правиле.
+
+```
+terraform import google_compute_firewall.firewall_ssh default-allow-ssh
+
+terraform apply
+```
+
+### Взаимосвязи ресурсов
+
+Добавил ресурс с IP-адресом
+```
+resource "google_compute_address" "app_ip" {
+  name = "reddit-app-ip"
+}
+```
+
+Добавил этот IP-адрес в конфиг инстанса
+```
+network_interface {
+ network = "default"
+ access_config {
+   nat_ip = google_compute_address.app_ip.address
+ }
+}
+```
+
+Ссылку в одном ресурсе на атрибуты другого тераформ
+понимает как зависимость одного ресурса от другого. Это влияет
+на очередность создания и удаления ресурсов при применении
+изменений.
+
+Применил изменения
+```
+terraform destroy
+terraform apply
+```
+
+### Структуризация ресурсов
+
+С помощью packer создал два имаджа:
+* reddit-app, содержащий ruby
+* reddit-db, содержащий mongodb
+
+Разбил main.tf на app.tf, db.tf и vpc.tf
+
+### Модули
+
+Создал модули app, db и vpc:
+```
+modules/
+  app/
+    main.tf
+    outputs.tf
+    variables.tf
+  db/
+    main.tf
+    outputs.tf
+    variables.tf
+  vpc/
+    main.tf
+    variables.tf
+```
+
+Переместил туда конфиги из db.tf, app.tf и vpc.tf
+
+В корневой main.tf добавил подключение модулей:
+```
+module "app" {
+  source          = "./modules/app"
+  public_key_path = var.public_key_path
+  zone            = var.zone
+  app_disk_image  = var.app_disk_image
+}
+
+module "db" {
+  source          = "./modules/db"
+  public_key_path = var.public_key_path
+  zone            = var.zone
+  db_disk_image   = var.db_disk_image
+}
+
+module "vpc" {
+  source        = "./modules/vpc"
+}
+```
+
+Для подключение модулей выполнинл `terraform get`.
+
+### Переиспользование модулей
+
+Создал
+```
+terraform/
+  prod/
+    main.tf
+    outputs.tf
+    terraform.tfvars
+    variables.tf
+  stage/
+    main.tf
+    outputs.tf
+    terraform.tfvars
+    variables.tf
+```
+
+Содержимое для этих файлов взял из аналогичных файлов в папке terraform,
+после чего удалил их.
+
+В stage source_ranges = ["0.0.0.0/0"]
+В prod source_ranges = ["80.250.215.124/32"] 
+
+### Работа с реестром модулей
+
+Список модулей https://registry.terraform.io/browse/modules?provider=google
+
+Подключил модуль `storage-bucket`:
+```
+provider "google" {
+  version = "~> 2.15"
+  project = var.project
+  region  = var.region
+}
+
+module "storage-bucket" {
+  source  = "SweetOps/storage-bucket/google"
+  version = "0.3.0"
+
+  name     = "fresk-storage-bucket"
+  location = var.region
+}
+
+output storage-bucket_url {
+  value = module.storage-bucket.url
+}
+```
+
+### Задание со *
+
+Добавил gcs бекенд, для хранения стейта в сторадже:
+```
+terraform {
+  backend "gcs" {
+    bucket  = "fresk-storage-bucket"
+    prefix  = "terraform/prod/state"
+  }
+}
+```
+
+### Задание с **
+
+Добавил провижины для modules/app, чтобы скачать и запустить приложение.
+Добавил конфиг для mongodb, где поменял `bindIp: 127.0.0.1` на `bindIp: 0.0.0.0`,
+и соотвественно провижины для modules/db для загрузки этого конфига.
+
+### Список полезных источников
+* https://www.terraform.io/docs/backends/types/gcs.html
+* https://github.com/coreos/docs/blob/master/os/using-environment-variables-in-systemd-units.md
+* https://docs.mongodb.com/manual/reference/configuration-options/

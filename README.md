@@ -1004,3 +1004,217 @@ terraform {
 * https://www.terraform.io/docs/backends/types/gcs.html
 * https://github.com/coreos/docs/blob/master/os/using-environment-variables-in-systemd-units.md
 * https://docs.mongodb.com/manual/reference/configuration-options/
+
+## Homework 8. Знакомство с Ansible
+
+###  Установка
+
+[Официальная документация по установке](https://docs.ansible.com/ansible/latest/installation_guide/intro_installation.html).
+
+Создал файл ansible/requirements.txt
+```
+ansible>=2.4
+```
+
+Установил ansible
+```
+sudo pip install -r ansible/requirements.txt
+```
+
+### Управление хостом
+
+Развернул stage инфраструктуру с помощью terraform.
+
+Добавил файл ansible/inventory:
+```
+appserver ansible_host=35.233.83.71
+dbserver ansible_host=34.76.52.222
+```
+
+Добавил файл ansible/ansible.cfg:
+```
+[defaults]
+inventory = ./inventory
+remote_user = appuser
+private_key_file = ~/.ssh/appuser
+host_key_checking = False
+retry_files_enabled = False
+```
+
+Выполнил команду uptime для dbserver:
+```
+ansible dbserver -m command -a uptime
+
+dbserver | CHANGED | rc=0 >>
+ 14:55:44 up 11 min,  1 user,  load average: 0.00, 0.04, 0.06
+```
+
+Добавил группы в inventory:
+```
+[app] <- Это имя группы
+appserver ansible_host=35.233.83.71
+
+[db] <- Это имя группы
+dbserver ansible_host=34.76.52.222
+```
+
+Выполнял ping для группы app:
+```
+ansible app -m ping
+
+appserver | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+```
+
+Переаписал inventory на yml:
+```
+app:
+  hosts:
+    appserver:
+      ansible_host: 35.233.83.71
+
+db:
+  hosts:
+    dbserver:
+      ansible_host: 34.76.52.222
+```
+
+Выполнил ping для всех хостов:
+```
+ansible all -m ping -i inventory.yml
+
+dbserver | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+appserver | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+```
+
+Проверил, что на appserver установлен ruby:
+```
+ansible app -m command -a 'ruby -v'
+
+appserver | CHANGED | rc=0 >>
+ruby 2.3.1p112 (2016-04-26) [x86_64-linux-gnu]
+```
+
+
+Проверил, что на appserver установлены ruby и bundler:
+```
+ansible app -m shell -a 'ruby -v; bundler -v'
+
+appserver | CHANGED | rc=0 >>
+ruby 2.3.1p112 (2016-04-26) [x86_64-linux-gnu]
+Bundler version 1.11.2
+```
+Для этой цели не подходит `command`, так как модуль `command` 
+выполняет команды, не используя оболочку (sh, bash),
+поэтому в нем не работают перенаправления потоков
+и нет доступа к некоторым переменным окружения.
+
+Проверил статус mongodb:
+```
+ansible db -m command -a 'systemctl status mongod'
+
+dbserver | CHANGED | rc=0 >>
+* mongod.service - High-performance, schema-free document-oriented database
+   Loaded: loaded (/lib/systemd/system/mongod.service; enabled; vendor preset: enabled)
+   Active: active (running) since Sun 2019-10-13 14:44:30 UTC; 26min ago
+     Docs: https://docs.mongodb.org/manual
+ Main PID: 2083 (mongod)
+    Tasks: 20
+   Memory: 31.4M
+      CPU: 8.506s
+   CGroup: /system.slice/mongod.service
+           `-2083 /usr/bin/mongod --quiet --config /etc/mongod.conf
+
+Oct 13 14:44:30 reddit-db systemd[1]: Stopped High-performance, schema-free document-oriented database.
+Oct 13 14:44:30 reddit-db systemd[1]: Started High-performance, schema-free document-oriented database.
+```
+
+> А можно так - ansible db -m systemd -a name=mongod
+
+> Или еще лучше так - ansible db -m service -a name=mongod
+
+Клонирование репозитория:
+```
+ansible app -m git -a \
+'repo=https://github.com/express42/reddit.git dest=/home/appuser/reddit'
+
+appserver | SUCCESS => {
+    "after": "5c217c565c1122c5343dc0514c116ae816c17ca2",
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python"
+    },
+    "before": "5c217c565c1122c5343dc0514c116ae816c17ca2",
+    "changed": false,
+    "remote_url_changed": false
+}
+```
+
+`changed: false` означает, что репозиторий уже склонирован. 
+А если вместо модуля `git` использовать `command`, то повторнный запуск
+приведет к ошибке.
+
+### Playbook
+
+Создал clone.yml:
+```
+- name: Clone
+  hosts: app
+  tasks:
+    - name: Clone repo
+      git:
+        repo: https://github.com/express42/reddit.git
+        dest: /home/appuser/reddit
+``` 
+
+Выполнил playbook:
+```
+ansible-playbook clone.yml
+
+PLAY RECAP *****************************************************************************************
+appserver : ok=2    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+```
+Изменений нет, так как репозиторий уже склонирован.
+
+Удалил репозиторий:
+```
+ansible app -m command -a 'rm -rf ~/reddit'
+```
+
+Выполнил еще раз playbook:
+```
+ansible-playbook clone.yml
+
+PLAY RECAP *****************************************************************************************
+appserver : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+```
+Изменения есть, так как ранее репозиторий был удален, а теперь склонирован.
+
+### Задание со *
+
+* https://docs.ansible.com/ansible/latest/plugins/inventory/script.html#script-inventory
+* https://medium.com/@Nklya/динамическое-инвентори-в-ansible-9ee880d540d6
+
+Создал скрипт ansible/inventory.sh для динамического формирования inventory.
+Скрипт возвращает json с хостами.
+
+Использование:
+```
+ansible all -m ping -i inventory.sh
+```

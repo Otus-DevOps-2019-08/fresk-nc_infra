@@ -1218,3 +1218,316 @@ appserver : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescu
 ```
 ansible all -m ping -i inventory.sh
 ```
+
+## Homework 9. Деплой и управление конфигурацией с Ansible
+
+### Один плейбук, один сценарий
+
+Создал плейбук reddit_app.yml:
+```
+- name: Configure hosts & deploy application
+  hosts: all
+  vars:
+    mongo_bind_ip: 0.0.0.0 # <-- Переменная задается в блоке vars
+  tasks:
+    - name: Change mongo config file
+      become: true # <-- Выполнить задание от root
+      template:
+        src: templates/mongod.conf.j2 # <-- Путь до локального файла-шаблона
+        dest: /etc/mongod.conf # <-- Путь на удаленном хосте
+        mode: 0644 # <-- Права на файл, которые нужно установить
+      tags: db-tag
+      notify: restart mongod
+      
+  handlers: # <-- Добавим блок handlers и задачу
+    - name: restart mongod
+      become: true
+      service: name=mongod state=restarted    
+````
+
+Добавил шаблон для mongodb templates/mongod.conf.j2
+```
+# Where and how to store data.
+storage:
+  dbPath: /var/lib/mongodb
+  journal:
+    enabled: true
+
+# where to write logging data.
+systemLog:
+  destination: file
+  logAppend: true
+  path: /var/log/mongodb/mongod.log
+
+# network interfaces
+net:
+  port: {{ mongo_port | default('27017') }}
+  bindIp: {{ mongo_bind_ip }}
+```
+
+Запустил пробный прогон:
+```
+ansible-playbook reddit_app.yml --check --limit db --tags db-tag
+```
+
+```
+--check пробный прогон
+--limit выполняет плейбук только для переданных хостов
+--tags выполняет таски с переданными тегами
+```
+
+Применил плейбук:
+```
+ansible-playbook reddit_app.yml --limit db --tags db-tag
+```
+
+Добавил файл files/puma.service:
+```
+[Unit]
+Description=Puma HTTP Server
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/home/appuser/db_config
+User=appuser
+WorkingDirectory=/home/appuser/reddit
+ExecStart=/bin/bash -lc 'puma'
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Добавил шаблон templates/mongod.conf.j2, в который будет
+подставляться адрес db_host:
+```
+DATABASE_URL={{ db_host }}
+```
+
+Добавил таски и хендлер для app:
+```
+- name: Configure hosts & deploy application
+  ...
+  tasks:
+    ...
+
+    - name: Add unit file for Puma
+      become: true
+      copy:
+        src: files/puma.service
+        dest: /etc/systemd/system/puma.service
+      tags: app-tag
+      notify: reload puma
+      
+    - name: Add config for DB connection
+      template:
+        src: templates/db_config.j2
+        dest: /home/appuser/db_config
+      tags: app-tag  
+
+    - name: enable puma
+      become: true
+      systemd: name=puma enabled=yes
+      tags: app-tag
+
+  handlers:
+    ...
+
+    - name: reload puma
+      become: true
+      systemd: name=puma state=restarted
+```
+
+Запустил пробный прогон:
+```
+ansible-playbook reddit_app.yml --check --limit app --tags app-tag
+```
+
+Применил плейбук:
+```
+ansible-playbook reddit_app.yml --limit app --tags app-tag
+```
+
+Добавил таски для деплоя приложения:
+```
+...
+- name: Fetch the latest version of application code
+  git:
+    repo: 'https://github.com/express42/reddit.git'
+    dest: /home/appuser/reddit
+    version: monolith # <-- Указываем нужную ветку
+  tags: deploy-tag
+  notify: reload puma
+
+- name: Bundle install
+  bundler:
+    state: present
+    chdir: /home/appuser/reddit # <-- В какой директории выполнить команду bundle
+  tags: deploy-tag
+```
+
+Применил плейбук:
+```
+ansible-playbook reddit_app.yml --limit app --tags deploy-tag
+```
+
+### Один плейбук, несколько сценариев
+
+В предыдущей части мы создали один плейбук, в котором
+определили один сценарий (play) и, как помним, для запуска
+нужных тасков на заданной группе хостов мы использовали
+опцию --limit для указания группы хостов и --tags для
+указания нужных тасков.
+
+Очевидна проблема такого подхода, которая состоит в том,
+что мы должны помнить при каждом запуске плейбука, на каком
+хосте какие таски мы хотим применить, и передавать это в
+опциях командной строки.
+
+Попробуем улучшить ситуацию.
+
+Скопировал все что касается db в отдельный файл - reddit_app2.yml,
+при это поправил описание, унес become и tags на уровень выше, поменял hosts:
+```
+- name: Configure mongoDB
+  hosts: db
+  tags: db-tag
+  become: true
+  vars:
+    mongo_bind_ip: 0.0.0.0
+  tasks:
+    - name: Change mongo config file
+      template:
+        src: templates/mongod.conf.j2
+        dest: /etc/mongod.conf
+        mode: 0644
+      notify: restart mongod
+
+  handlers:
+    - name: restart mongod
+      become: true
+      service: name=mongod state=restarted
+```
+
+Аналогично поступил для app:
+```
+- name: Configure App
+  hosts: app
+  tags: app-tag
+  become: true
+  vars:
+    db_host: 10.132.0.51
+  tasks:
+    - name: Add unit file for Puma
+      become: true
+      copy:
+        src: files/puma.service
+        dest: /etc/systemd/system/puma.service
+      notify: reload puma
+
+    - name: Add config for DB connection
+      template:
+        src: templates/db_config.j2
+        dest: /home/appuser/db_config
+
+    - name: enable puma
+      become: true
+      systemd: name=puma enabled=yes
+
+  handlers:
+    - name: reload puma
+      become: true
+      systemd: name=puma state=restarted
+```   
+
+И для deploy
+```
+- name: Deploy App
+  hosts: app
+  tags: deploy-tag
+  tasks:
+    - name: Fetch the latest version of application code
+      git:
+        repo: 'https://github.com/express42/reddit.git'
+        dest: /home/appuser/reddit
+        version: monolith
+      notify: restart puma
+
+    - name: bundle install
+      bundler:
+        state: present
+        chdir: /home/appuser/reddit
+
+  handlers:
+    - name: restart puma
+      become: true
+      systemd: name=puma state=restarted
+```   
+
+Применил изменения:
+```
+ansible-playbook reddit_app2.yml --check --tags db-tag
+ansible-playbook reddit_app2.yml --tags db-tag
+
+ansible-playbook reddit_app2.yml --check --tags app-tag
+ansible-playbook reddit_app2.yml --tags app-tag
+
+ansible-playbook reddit_app2.yml --check --tags deploy-tag
+ansible-playbook reddit_app2.yml --tags deploy-tag
+```
+
+### Несколько плейбуков
+
+Описав несколько сценариев для управления конфигурацией
+инстансов и деплоя приложения, управлять хостами стало
+немного легче.
+
+Теперь, для того чтобы применить нужную часть
+конфигурационного кода (сценарий) к нужной группе хостов
+достаточно лишь указать ссылку на эту часть кода, используя
+тег.
+
+Но с ростом числа управляемых сервисов, будет расти
+количество различных сценариев и, как результат, увеличится
+объем плейбука.
+
+Попробуем разделить плейбук на несколько.
+
+Создал три файла:
+* `app.yml`
+* `db.yml`
+* `deploy.yml`
+
+Перенес туда код из `reddit_app2.yml`, удалив теги
+
+Переименовал предыдущие плейбуки:
+* `reddit_app.yml -> reddit_app_one_play.yml`
+* `reddit_app2.yml -> reddit_app_multiple_plays.yml`
+
+Создал файл site.yml:
+```
+- import_playbook: db.yml
+- import_playbook: app.yml
+- import_playbook: deploy.yml
+```
+
+Применил плейбук
+```
+ansible-playbook site.yml --check
+ansible-playbook site.yml
+```
+
+### Packer
+
+Переписал провижины в packer/db.json и packer/app.json на ansible.
+ 
+### Задание со *
+
+Написал dynamic inventory(он уже был, добавил переменную db_host).
+
+### Полезные источники
+
+* https://docs.ansible.com/ansible/latest/dev_guide/developing_inventory.html
+* https://docs.ansible.com/ansible/latest/modules/list_of_all_modules.html
+* https://docs.ansible.com/ansible/latest/user_guide/playbooks_loops.html

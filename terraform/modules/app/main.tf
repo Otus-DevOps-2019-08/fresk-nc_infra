@@ -1,8 +1,12 @@
 resource "google_compute_instance" "app" {
-  name = "reddit-app"
+  name = "reddit-app-${var.env}"
   machine_type = "g1-small"
   zone = var.zone
   tags = ["reddit-app"]
+  labels = {
+    env = var.env
+    group = "app"
+  }
   boot_disk {
     initialize_params { image = var.app_disk_image }
   }
@@ -17,13 +21,13 @@ resource "google_compute_instance" "app" {
     ssh-keys = "appuser:${file(var.public_key_path)}"
   }
 
-  connection {
-    type        = "ssh"
-    host        = self.network_interface[0].access_config[0].nat_ip
-    user        = "appuser"
-    agent       = false
-    private_key = file(var.private_key_path)
-  }
+  #connection {
+  #  type        = "ssh"
+  #  host        = self.network_interface[0].access_config[0].nat_ip
+  #  user        = "appuser"
+  #  agent       = false
+  #  private_key = file(var.private_key_path)
+  #}
 
   #provisioner "file" {
   #  source      = "${path.module}/files/puma.service"
@@ -42,15 +46,15 @@ resource "google_compute_instance" "app" {
 }
 
 resource "google_compute_address" "app_ip" {
-  name = "reddit-app-ip"
+  name = "reddit-app-ip-${var.env}"
 }
 
 resource "google_compute_firewall" "firewall_puma" {
-  name = "allow-puma-default"
+  name = "allow-puma-default-${var.env}"
   network = "default"
   allow {
     protocol = "tcp"
-    ports = ["9292"]
+    ports = ["9292", "80"]
   }
   source_ranges = ["0.0.0.0/0"]
   target_tags = ["reddit-app"]

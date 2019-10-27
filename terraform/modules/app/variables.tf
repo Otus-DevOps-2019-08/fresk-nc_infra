@@ -18,3 +18,7 @@ variable app_disk_image {
 variable db_ip {
   description = "IP of mongodb"
 }
+
+variable env {
+  description = "Environment"
+}

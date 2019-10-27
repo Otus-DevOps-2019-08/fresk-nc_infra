@@ -16,6 +16,7 @@ module "app" {
   zone             = var.zone
   app_disk_image   = var.app_disk_image
   db_ip            = "${module.db.db_internal_ip}"
+  env              = var.env
 }
 
 module "db" {
@@ -24,9 +25,11 @@ module "db" {
   private_key_path = var.private_key_path
   zone             = var.zone
   db_disk_image    = var.db_disk_image
+  env              = var.env
 }
 
 module "vpc" {
   source        = "../modules/vpc"
   source_ranges = ["0.0.0.0/0"]
+  env           = var.env
 }

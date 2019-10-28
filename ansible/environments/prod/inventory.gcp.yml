@@ -1,0 +1,15 @@
+plugin: gcp_compute
+projects:
+  - formal-office-253321
+auth_kind: serviceaccount
+service_account_file: ~/.gce/formal-office-253321-5acd7e7511e0.json
+hostnames:
+  - name
+compose:
+  ansible_host: networkInterfaces[0].accessConfigs[0].natIP
+filters:
+  - labels.env = prod
+keyed_groups:
+  - prefix: ""
+    separator: ""
+    key: labels.group

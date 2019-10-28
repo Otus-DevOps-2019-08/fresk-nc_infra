@@ -1,9 +1,13 @@
 resource "google_compute_instance" "db" {
-  name = "reddit-db"
+  name = "reddit-db-${var.env}"
   machine_type = "g1-small"
   zone = var.zone
-    tags = ["reddit-db"]
-    boot_disk {
+  tags = ["reddit-db"]
+  labels = {
+    env = var.env
+    group = "db"
+  }
+  boot_disk {
     initialize_params {
       image = var.db_disk_image
     }
@@ -16,13 +20,13 @@ resource "google_compute_instance" "db" {
     ssh-keys = "appuser:${file(var.public_key_path)}"
   }
 
-  connection {
-    type        = "ssh"
-    host        = self.network_interface[0].access_config[0].nat_ip
-    user        = "appuser"
-    agent       = false
-    private_key = file(var.private_key_path)
-  }
+  #connection {
+  #  type        = "ssh"
+  #  host        = self.network_interface[0].access_config[0].nat_ip
+  #  user        = "appuser"
+  #  agent       = false
+  #  private_key = file(var.private_key_path)
+  #}
 
   #provisioner "file" {
   #  source      = "${path.module}/files/mongod.conf"
@@ -35,7 +39,7 @@ resource "google_compute_instance" "db" {
 }
 
 resource "google_compute_firewall" "firewall_mongo" {
-  name = "allow-mongo-default"
+  name = "allow-mongo-default-${var.env}"
   network = "default"
   allow {
     protocol = "tcp"

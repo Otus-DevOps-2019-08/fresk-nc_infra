@@ -1844,3 +1844,429 @@ prod
 ### Полезные источники
 * https://docs.ansible.com/ansible/latest/plugins/inventory/gcp_compute.html
 * http://matthieure.me/2018/12/31/ansible_inventory_plugin.html
+
+## Homework 11. Разработка и тестирование Ansible ролей и плейбуков
+
+### Локальная разработка с Vagrant
+
+Установил [VirtualBox](https://www.virtualbox.org/wiki/Downloads).
+Установил [Vagrant](https://www.vagrantup.com/downloads.html).
+
+В директории `ansible` создал `Vagrantfile`:
+```
+Vagrant.configure("2") do |config|
+
+  config.vm.provider :virtualbox do |v|
+    v.memory = 512
+  end
+
+  config.vm.define "dbserver" do |db|
+    db.vm.box = "ubuntu/xenial64"
+    db.vm.hostname = "dbserver"
+    db.vm.network :private_network, ip: "10.10.10.10"
+  end
+  
+  config.vm.define "appserver" do |app|
+    app.vm.box = "ubuntu/xenial64"
+    app.vm.hostname = "appserver"
+    app.vm.network :private_network, ip: "10.10.10.20"
+  end
+end
+```
+
+Создал виртуалки, выполнил в директории `ansible`:
+```
+vagrant up
+```
+
+Проверил, что бокс скачалася:
+```
+vagrant box list
+
+ubuntu/xenial64 (virtualbox, 20191024.0.0)
+```
+
+Проверил статус машин:
+```
+vagrant status
+
+Current machine states:
+dbserver                  running (virtualbox)
+appserver                 running (virtualbox)
+```
+
+Подключился по `ssh` на `appserver` и запустил `ping`:
+```
+vagrant ssh appserver
+
+vagrant@appserver:~$ ping -c 2 10.10.10.10
+
+PING 10.10.10.10 (10.10.10.10) 56(84) bytes of data.
+64 bytes from 10.10.10.10: icmp_seq=1 ttl=64 time=0.406 ms
+64 bytes from 10.10.10.10: icmp_seq=2 ttl=64 time=1.14 ms
+
+--- 10.10.10.10 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 999ms
+rtt min/avg/max/mdev = 0.406/0.777/1.149/0.372 ms
+```
+
+#### Доработка ролей
+
+Добавил провижин `ansible` в `Vagrantfile`:
+```
+Vagrant.configure("2") do |config|
+
+  config.vm.provider :virtualbox do |v|
+    v.memory = 512
+  end
+
+  config.vm.define "dbserver" do |db|
+    db.vm.box = "ubuntu/xenial64"
+    db.vm.hostname = "dbserver"
+    db.vm.network :private_network, ip: "10.10.10.10"
+
+    db.vm.provision "ansible" do |ansible|
+      ansible.playbook = "playbooks/site.yml"
+      ansible.groups = {
+      "db" => ["dbserver"],
+      "db:vars" => {"mongo_bind_ip" => "0.0.0.0"}
+      }
+    end
+  end
+
+  config.vm.define "appserver" do |app|
+    app.vm.box = "ubuntu/xenial64"
+    app.vm.hostname = "appserver"
+    app.vm.network :private_network, ip: "10.10.10.20"
+  end
+end
+```
+
+> Применение провижина происходит при старте виртуалок, если
+хочется запустить провижин для уже запущенных, то нужно использовать
+команду `vagrant provision <name>`.
+
+Запустил провижин:
+```
+vagrant provision dbserver
+```
+
+Упала ошибка, так как нет python:
+```
+fatal: [dbserver]: FAILED! => {"changed": false, "failed": true, "module_stderr": "Shared connection to
+127.0.0.1 closed.\r\n", "module_stdout": "/bin/sh: 1:
+/usr/bin/python: not found\r\n", "msg": "MODULE FAILURE", "rc": 0}
+```
+
+Добавил плейбук `base.yml` с установкой python:
+```
+- name: Check && install python
+  hosts: all
+  become: true
+  gather_facts: False
+
+  tasks:
+    - name: Install python for Ansible
+      raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal)
+      changed_when: False
+```
+
+Добавил плейбук `base.yml` в `site.yml`, заодно удалил `users.yml` из него.
+
+Запустил провижин:
+```
+vagrant provision dbserver
+```
+
+На этот раз упала ошибка:
+```
+{"changed": false, "failed": true, "msg": "Could not find
+the requested service mongod: host"}
+```
+
+Добавил в роль `db` установку `mongodb` из плейбука `packer_db.yml`.
+
+Запустил провижин:
+```
+vagrant provision dbserver
+```
+
+Успех!
+
+Аналогично поправил роль `app`, добавив туда установку зависимостей.
+
+Добавил провижин для `appserver`:
+```
+Vagrant.configure("2") do |config|
+
+  config.vm.provider :virtualbox do |v|
+    v.memory = 512
+  end
+
+  config.vm.define "dbserver" do |db|
+    db.vm.box = "ubuntu/xenial64"
+    db.vm.hostname = "dbserver"
+    db.vm.network :private_network, ip: "10.10.10.10"
+
+    db.vm.provision "ansible" do |ansible|
+      ansible.playbook = "playbooks/site.yml"
+      ansible.groups = {
+      "db" => ["dbserver"],
+      "db:vars" => {"mongo_bind_ip" => "0.0.0.0"}
+      }
+    end
+  end
+
+  config.vm.define "appserver" do |app|
+    app.vm.box = "ubuntu/xenial64"
+    app.vm.hostname = "appserver"
+    app.vm.network :private_network, ip: "10.10.10.20"
+
+    app.vm.provision "ansible" do |ansible|
+      ansible.playbook = "playbooks/site.yml"
+      ansible.groups = {
+      "app" => ["appserver"],
+      "app:vars" => { "db_host" => "10.10.10.10"}
+      }
+    end
+  end
+end
+```
+
+> Мы нигде не указываем inventory, так как Vagrant сам его формирует из конфига.
+
+Запустил провижин:
+```
+vagrant provision appserver
+```
+
+Упала ошибка, так как нет пользователя `appuser`:
+```
+fatal: [appserver]: FAILED! => {"changed": false, "checksum": "dfbe4b5cf3ec32d91d20045e2ee7f7b26c60ef34",
+"msg": "Destination directory /home/appuser does not exist"}
+```  
+
+Параметризовал имя юзера - добавил переменную `deploy_user: appuser` в `roles/app/defaults/main.yml`,
+везде перешел на использование этой переменной. В `Vagrantfile` добавил переопределение переменной:
+```
+ansible.extra_vars = {
+  "deploy_user" => "vagrant"
+}
+```
+
+Запустил:
+```
+vagrant provision appserver
+```
+
+Успех!
+
+#### Проверка
+
+Потушил вируталки:
+```
+vagrant destroy -f
+```
+
+Запустил:
+``` 
+vagrant up
+```
+
+Проверил что приложение доступно по адресу `10.10.10.20:9292`.
+
+Потушил вируталки:
+```
+vagrant destroy -f
+``` 
+
+#### Задание со *
+
+**Задание**
+
+Дополните конфигурацию Vagrant для корректной работы проксирования
+приложения с помощью nginx.
+
+**Решение**
+
+Добавил в `Vagrantfile` в секцию `extra_vars`:
+```
+ansible.extra_vars = {
+    "deploy_user" => "vagrant",
+    "nginx_sites" => {
+     "default" => [
+       "listen 80",
+       "server_name \"reddit\"",
+       "location / {
+         proxy_pass http://127.0.0.1:9292;
+       }"
+     ]
+    }
+}
+```
+
+### Тестирование роли
+
+Добавил зависимости в `requirements.txt`:
+```
+...
+molecule>=2.6
+testinfra>=1.10
+python-vagrant>=0.5.15
+```
+
+Установил зависимости используя [virtualenv](https://docs.python-guide.org/dev/virtualenvs/):
+```
+virtualenv venv
+source venv/bin/activate
+
+pip install -r ansible/requirements.txt
+```
+
+Создал заготовку для тестов роли `db`:
+```
+cd ansible/roles/db
+
+molecule init scenario --scenario-name default -r db -d vagrant
+```
+
+Добавил несколько тестов в `db/molecule/default/tests/test_default.py`:
+```
+import os
+
+import testinfra.utils.ansible_runner
+
+testinfra_hosts = testinfra.utils.ansible_runner.AnsibleRunner(
+    os.environ['MOLECULE_INVENTORY_FILE']).get_hosts('all')
+
+# check if MongoDB is enabled and running
+def test_mongo_running_and_enabled(host):
+    mongo = host.service("mongod")
+    assert mongo.is_running
+    assert mongo.is_enabled
+
+# check if configuration file contains the required line
+def test_config_file(host):
+    config_file = host.file('/etc/mongod.conf')
+    assert config_file.contains('bindIp: 0.0.0.0')
+    assert config_file.is_file
+```
+
+> Описание тестовой машины, которая создается Molecule для
+тестов содержится в файле `db/molecule/default/molecule.yml`.
+
+```
+molecule create
+```
+
+Создал VM для проверки роли:
+```
+molecule create
+```
+
+> `molecule list` - список инстансов 
+
+> `molecule login -h instance` - подключение к инстансу
+
+Molecule init генерирует плейбук для применения
+нашей роли. Данный плейбук можно посмотреть
+по пути `db/molecule/default/playbook.yml`.
+
+Добавил `become: true` и переменные в этот плейбук:
+```
+- name: Converge
+  hosts: all
+  become: true
+  vars:
+    mongo_bind_ip: 0.0.0.0
+  roles:
+    - role: db
+```
+
+Применил плейбук:
+```
+molecule converge
+```
+
+Прогнал тесты:
+```
+molecule verify
+```
+
+#### Самостоятельное задание
+
+Добавил тест что монга слушает порт 27017
+```
+# check if MongoDB is listening on 0.0.0.0:27017
+def test_mongo_socket(host):
+    socket = host.socket("tcp://0.0.0.0:27017")
+    assert socket.is_listening
+```
+
+В плейбуке `packer_app.yml` перешел на использование роли `app`:
+```
+- name: Install Ruby && Bundler
+  hosts: all
+  become: true
+  roles:
+    - app
+```
+ 
+В роль `app` добавил теги:
+```
+- include: ruby.yml
+  tags:
+    - ruby
+
+- include: puma.yml
+  tags:
+    - puma
+```
+
+В `packer/app.json` добавил тег и путь до ролей:
+```
+"provisioners": [
+  {
+    "type": "ansible",
+    "playbook_file": "ansible/playbooks/packer_app.yml",
+    "ansible_env_vars": ["ANSIBLE_ROLES_PATH={{ pwd }}/ansible/roles"],
+    "extra_arguments": ["--tags", "ruby"]
+  }
+]
+```
+
+В плейбуке `packer_db.yml` перешел на использование роли `db`:
+```
+- name: Install MongoDB
+  hosts: all
+  become: true
+  roles:
+    - db
+```
+
+В роль `db` добавил теги:
+```
+- include: install_mongo.yml
+  tags:
+    - install_mongo
+
+- include: config_mongo.yml
+  tags:
+    - config_mongo
+```
+
+В `packer/db.json` добавил тег и путь до ролей:
+```
+"provisioners": [
+  {
+    "type": "ansible",
+    "playbook_file": "ansible/playbooks/packer_db.yml",
+    "ansible_env_vars": ["ANSIBLE_ROLES_PATH={{ pwd }}/ansible/roles"],
+    "extra_arguments": ["--tags", "install_mongo"]
+  }
+]
+```
+
+### Полезные источники:
+
+* https://docs.ansible.com/ansible/latest/reference_appendices/config.html#default-roles-path
